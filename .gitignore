@@ -1,0 +1,35 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Audio temp files
+backend/temp_audio/
+*.wav
+*.mp3
+*.ogg
+*.m4a
+*.webm
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings (personal permissions)
+.claude/settings.local.json
