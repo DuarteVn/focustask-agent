@@ -14,6 +14,9 @@ env/
 dist/
 build/
 
+# SQLite (dev artifact)
+*.db
+
 # Audio temp files
 backend/temp_audio/
 *.wav
