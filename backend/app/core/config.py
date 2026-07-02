@@ -26,3 +26,14 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+    whisper_device: str = "cuda"
+    whisper_compute_type: str = "float16"
+
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3:8b"
+
+    temp_audio_dir: str = "./temp_audio"
+    log_level: str = "INFO"
+
+
+settings = Settings()

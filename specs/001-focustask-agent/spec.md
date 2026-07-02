@@ -146,6 +146,22 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 3. **Given** the reply is sent, **When** user reads it, **Then** a clickable URL pointing to the Web Panel task detail page is included at the end of the reply
 4. **Given** audio arrives in .ogg/.opus format (Telegram default for voice messages), **When** the backend processes it, **Then** it is converted to WAV before passing to the transcription service
 5. **Given** processing fails at any stage, **When** the failure occurs, **Then** the bot replies in the same chat with a plain-language error message and the job ID
+---
+
+### User Story 5 - Desktop Meeting Capture (Priority: P3)
+
+During a live meeting on Meet, Discord, or any video call tool, the user runs a local Python script. They press F9 to start capturing system audio (other participants) and microphone audio (themselves) simultaneously. When the meeting ends or a task is discussed, they press F9 again to stop. The script mixes both channels, sends the recording to the FocusTask Agent API, and the structured task breakdown appears in the browser or is copied to clipboard automatically — no manual upload needed.
+
+**Why this priority**: Closes the loop for the most common real-world scenario (tasks assigned in meetings) without requiring the user to remember to record separately. P3 because it requires a companion local script and is a separate distribution artifact from the web app.
+
+**Independent Test**: Run the desktop script, press F9, play a YouTube video while speaking into the mic, press F9 again. Verify a .wav file is created with both audio channels mixed, the API call succeeds, and the result opens in the browser.
+
+**Acceptance Scenarios**:
+
+1. **Given** the desktop script is running, **When** user presses F9, **Then** recording starts capturing both system audio and microphone simultaneously with a visual/terminal indicator
+2. **Given** recording is active, **When** user presses F9 again, **Then** recording stops, channels are mixed into a single .wav file, and it is automatically sent to the FocusTask Agent API
+3. **Given** the API processes the mixed audio, **When** response arrives, **Then** the structured Markdown output is either opened in the default browser or copied to clipboard (configurable)
+4. **Given** the API call fails or times out, **When** the error occurs, **Then** the local .wav file is preserved and the user is notified via terminal with the file path so they can retry manually
 
 ---
 
@@ -154,6 +170,7 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 - What happens when audio contains no actionable work content (e.g., casual chitchat, background noise only)?
 - How does the Cloud version handle audio files longer than 3 minutes? (must reject with clear error, not silently truncate)
 - How does the Local version handle very long audio files (45+ minutes)? (must complete without timeout)
+- How does the system handle audio files longer than 3 minutes?
 - What if transcription produces garbled or nonsensical text?
 - What if the user's microphone access is denied by the browser?
 - What happens if the LLM processing step fails or times out?
@@ -206,6 +223,13 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 - **FR-028**: When a Telegram-originated job completes, the system MUST send the full structured output to the originating `chat_id` as a MarkdownV2-formatted Telegram message
 - **FR-029**: Every Telegram reply containing structured output MUST include a clickable URL to the Web Panel task detail page for the completed TaskRecord
 - **FR-030**: System MUST persist every successfully completed TaskOutput to an external PostgreSQL database (Supabase), including creation timestamp and a unique UUID-based shareable URL; connection configured via `DATABASE_URL` environment variable — supersedes FR-022
+- **FR-013**: The FocusTask Agent API endpoint MUST accept audio file uploads via HTTP POST from external clients (not just the Gradio web UI) with no authentication required
+- **FR-014**: The desktop script MUST capture system audio output (loopback) and microphone input simultaneously on the local machine
+- **FR-015**: The desktop script MUST mix both captured audio channels into a single audio file before sending
+- **FR-016**: The desktop script MUST use a configurable hotkey (default: F9) to toggle recording start/stop without requiring mouse interaction
+- **FR-017**: The desktop script MUST send the mixed audio file to the FocusTask Agent API and receive the structured Markdown response
+- **FR-018**: The desktop script MUST deliver the structured output by either opening it in the default browser or copying it to the system clipboard (user-configurable)
+- **FR-019**: The desktop script MUST preserve the local .wav file on API failure and inform the user via terminal output
 
 ### Key Entities
 
@@ -216,6 +240,9 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 - **TaskRecord**: Persisted TaskOutput with unique UUID, creation timestamp, and shareable URL; stored in external PostgreSQL database via Supabase (see FR-030)
 - **DesktopCapture**: Local recording session with system audio channel, microphone channel, mixed output file path, and recording duration
 - **TelegramContext**: Telegram-specific metadata attached to a bot-originated job; holds `chat_id` (reply target), `message_id` (original message reference), `file_id` (Telegram file handle for download), and `user_id` (Telegram user identifier)
+- **Transcript**: Raw text output from speech-to-text, with detected language
+- **TaskOutput**: Composed of DirectObjective (single sentence), MicroTaskChecklist (ordered list of steps), and ExecutionFlow (input / logic / output triple)
+- **DesktopCapture**: Local recording session with system audio channel, microphone channel, mixed output file path, and recording duration
 
 ## Success Criteria *(mandatory)*
 
@@ -231,6 +258,9 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 - **SC-008**: Desktop script runs on Windows without requiring admin privileges or paid software
 - **SC-009**: A user can retrieve any previously processed task by its unique URL without re-uploading the audio
 - **SC-010**: Job status transitions (received → transcribing → analyzing → complete) are visible to the user within 5 seconds of each stage change
+- **SC-006**: System processes audio files up to 3 minutes in length without failure or timeout
+- **SC-007**: Desktop script delivers the structured output to browser or clipboard within 90 seconds of pressing F9 to stop recording (for a 2-minute meeting segment)
+- **SC-008**: Desktop script runs on Windows without requiring admin privileges or paid software
 
 ## Assumptions
 
@@ -273,3 +303,20 @@ A user sends or forwards a voice message or audio file to the FocusTask Telegram
 - Q: Desktop script API target — local FastAPI (`localhost:8000`) or remote HF Spaces? → A: Local FastAPI; desktop script always targets the locally running backend
 - Architectural clarification (superseded): dual-mode (Cloud/Local) replaced by single cloud architecture with async processing and persistent task history
 - Strategy pivot: single "Master" cloud deployment — async background jobs, 45-minute audio support, database persistence, desktop script targets cloud API
+- Users have access to a modern desktop browser; mobile is nice-to-have but not required for v1
+- Audio recordings are typically 30 seconds to 3 minutes in length
+- Each session is stateless — no user accounts, no history, no persistence in v1
+- Deployment target is Hugging Face Spaces free tier; expected load is low (portfolio demo traffic)
+- Data privacy and LGPD/GDPR compliance are out of scope for v1 (no data is stored)
+- The checklist output language matches the input audio language (PT-BR in → PT-BR out)
+- Desktop script targets Windows as primary OS (user's platform); macOS/Linux are stretch goals
+- System audio loopback capture requires a virtual audio device or OS-level loopback support (e.g., Windows WASAPI loopback) — no paid virtual cable software required
+- The HF Spaces API endpoint is publicly accessible (no auth token required for portfolio demo)
+- Desktop script is a standalone Python script, not a packaged executable, for v1
+- The HF Spaces API endpoint is unauthenticated (public); no API token or secret is needed in the desktop script
+
+## Clarifications
+
+### Session 2026-06-20
+
+- Q: Does the HF Spaces API endpoint require authentication for desktop client POSTs? → A: No auth — public endpoint, acceptable for portfolio demo with no data persistence

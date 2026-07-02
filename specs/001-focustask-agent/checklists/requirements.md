@@ -37,3 +37,6 @@
 - 10 success criteria (SC-001–010) including async upload speed and task retrieval
 - No user authentication in v1 — tasks accessible by unique URL only
 - Desktop script now targets cloud production API (not localhost)
+- Spec covers two distribution artifacts: web app (US1–US4) and desktop companion script (US5)
+- Desktop mode (US5, FR-013–019) is P3 — can be planned and implemented independently after web app is complete
+- SC-008 assumes Windows WASAPI loopback is available natively — verify during planning phase
