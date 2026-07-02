@@ -1,22 +1,12 @@
+from typing import List, Optional
+
 from pydantic import BaseModel
-from typing import List
 
 
-class MicroTask(BaseModel):
-    order: int
-    action: str
-
-
-class GlossaryItem(BaseModel):
-    term: str
-    definition: str
-
-
-class StructuredTask(BaseModel):
-    big_picture: str
-    micro_tasks: List[MicroTask]
-    definition_of_done: List[str]
-    glossary: List[GlossaryItem]
+class StructuredOutput(BaseModel):
+    objetivo: str
+    checklist: List[str]
+    fluxo: List[str]
 
 
 class TranscriptionResponse(BaseModel):
@@ -26,11 +16,20 @@ class TranscriptionResponse(BaseModel):
 
 
 class ProcessResponse(BaseModel):
+    job_id: str
     raw_transcript: str
-    structured: StructuredTask
+    structured: StructuredOutput
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: str
+    structured: Optional[StructuredOutput] = None
+    transcript: Optional[str] = None
+    error: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
     status: str
     whisper_loaded: bool
-    ollama_reachable: bool
+    llm: str  # "ready" | "unconfigured"
