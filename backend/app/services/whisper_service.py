@@ -55,7 +55,7 @@ class WhisperService:
             raise RuntimeError(f"FFmpeg failed: {result.stderr}")
         return output_path
 
-    def transcribe(self, audio_bytes: bytes, original_filename: str) -> dict:
+    def transcribe(self, audio_bytes: bytes, original_filename: str, progress_cb=None) -> dict:
         if self._model is None:
             raise RuntimeError("Whisper model not loaded. Call load() first.")
 
@@ -78,7 +78,17 @@ class WhisperService:
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 500},
             )
-            transcript = " ".join(seg.text.strip() for seg in segments)
+            total_duration = info.duration or 1.0
+            last_pct = -1
+            parts = []
+            for seg in segments:
+                parts.append(seg.text.strip())
+                if progress_cb is not None:
+                    pct = min(99, int(seg.end / total_duration * 100))
+                    if pct >= last_pct + 10:
+                        last_pct = pct
+                        progress_cb(pct)
+            transcript = " ".join(parts)
             return {
                 "raw_transcript": transcript,
                 "language": info.language,
