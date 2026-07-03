@@ -17,6 +17,8 @@ async def init_db() -> None:
 
 
 async def _ensure_schema() -> None:
+    # Live-DB migration for pre-existing deployments (data-model.md):
+    #   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS summary TEXT;
     async with _pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -24,6 +26,7 @@ async def _ensure_schema() -> None:
                 status      TEXT NOT NULL DEFAULT 'pending',
                 source      TEXT NOT NULL DEFAULT 'web',
                 transcript  TEXT,
+                summary     TEXT,
                 objetivo    TEXT,
                 checklist   JSONB,
                 fluxo       JSONB,
@@ -31,6 +34,7 @@ async def _ensure_schema() -> None:
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        await conn.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS summary TEXT")
 
 
 async def get_pool() -> asyncpg.Pool:
