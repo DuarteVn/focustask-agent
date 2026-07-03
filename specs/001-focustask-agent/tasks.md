@@ -97,7 +97,7 @@ Web app backend: `backend/app/` (existing FastAPI layout), tests in `backend/tes
 **Purpose**: Consumer-facing touches, stale docs, final validation
 
 - [ ] T020 [P] Add Markdown download link to the Telegram reply in `backend/app/telegram/` (`job_runner.py::_format_result`): append `{web_panel_base_url}/jobs/{job_id}/download.md` line after the panel link
-- [ ] T021 [P] Update stale project docs in `CLAUDE.md` (root): core-flow description still says "Ollama LLM (local)" and "Stateless — no DB" — reflect actual stack (Gemini primary with Ollama fallback dormant, PostgreSQL job persistence, two-stage pipeline, Obsidian export); update Common Commands if needed
+- [x] T021 [P] Update stale project docs in `CLAUDE.md` (root): core-flow description still says "Ollama LLM (local)" and "Stateless — no DB" — reflect actual stack (Gemini primary with Ollama fallback dormant, PostgreSQL job persistence, two-stage pipeline, Obsidian export); update Common Commands if needed
 - [ ] T022 Run full quickstart.md validation (Scenarios 1–6) against a live server and record results in `specs/001-focustask-agent/quickstart.md` footer or PR description; confirm SC-006 (45-min audio) and SC-010 (zero-reformatting Obsidian import)
 - [ ] T023 Run `cd backend && python -m pytest tests/ -v` — full suite green; commit
 

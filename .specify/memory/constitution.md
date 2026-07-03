@@ -19,22 +19,22 @@ Templates status:
      resolves against this file; no edit needed
   ✅ .specify/templates/spec-template.md — no constitution-mandated section
      changes; no edit needed
-  ⚠ .specify/templates/tasks-template.md — marks tests "OPTIONAL - only if
-     explicitly requested", softer than Principle V ("a red test suite
-     blocks merge"); suggested alignment edit pending maintainer decision
+  ✅ .specify/templates/tasks-template.md — test tasks now REQUIRED with
+     no-live-dependencies discipline, aligned with Principle V
   ✅ specs/001-focustask-agent/plan.md — Constitution Check now evaluated
      against filled v1.0.0 (plan.md:40); prior ⚠ resolved
-Known open violations (code/docs follow-ups, tracked outside this file):
-  - P-I: backend/app/services/ollama_service.py is dead code — references
-    missing settings keys (ollama_base_url/ollama_model), English prompt,
-    divergent output schema; local fallback not currently viable
-  - P-III: numeric output limits (≤30-word objective, 3–10 checklist,
-    3–6 flow) not validated in backend/app/models/schemas.py
-  - P-IV: root CLAUDE.md stale ("Ollama LLM (local)", "Stateless — no DB");
-    fix already tasked as T021 in specs/001-focustask-agent/tasks.md
-  - P-V: no pytest suite exists yet (backend/tests/ absent)
-  - spec.md:257,259 ("no persistence in v1", "no data is stored")
-    contradict PostgreSQL job history in constitution/plan/data-model
+Known open violations: none — all remediated in the same PR as this
+amendment:
+  - P-I: ollama_service.py rewritten as viable dormant fallback (PT-BR
+    prompt, 3-section schema parity with gemini_service, settings keys
+    ollama_base_url/ollama_model added to config.py)
+  - P-III: numeric limits enforced in schemas.py (clamp maxima + warn on
+    minima; covered by tests)
+  - P-IV: root CLAUDE.md updated to Gemini-primary + PostgreSQL reality
+    (tasks.md T021 done); spec.md Assumptions corrected (persistence and
+    LGPD wording)
+  - P-V: pytest suite added under backend/tests/ — mocked service
+    boundaries, PT-BR fixtures, no live dependencies
 Deferred TODOs: none
 -->
 

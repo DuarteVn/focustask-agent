@@ -10,15 +10,19 @@ data-model.md, contracts/api.md, quickstart.md in the same directory.
 
 ## What this project is
 
-ADHD-friendly audio-to-structured-task pipeline. 
+ADHD-friendly audio-to-structured-task pipeline.
 
-**Core flow**: audio upload or mic → faster-whisper (local) → Ollama LLM (local) → 3-section structured output (objective + checklist + flow) → copy to clipboard.
+**Core flow**: audio (web upload, mic, or Telegram voice note) → faster-whisper (local) → Gemini free tier (retry + fallback key) → 3-section structured output (objetivo + checklist + fluxo) → PostgreSQL job history + Telegram reply / web response.
+
+A local Ollama path (`backend/app/services/ollama_service.py`) is kept as a dormant, interface-compatible fallback per constitution Principle I — not wired into the runtime today.
 
 ## Stack
 
 - **Backend**: FastAPI + Uvicorn (`backend/app/main.py`)
-- **Transcription**: faster-whisper (local, no API key needed)
-- **LLM**: Ollama running locally
+- **Transcription**: faster-whisper (local, CPU int8, no API key needed)
+- **LLM**: Gemini 2.5 Flash free tier (primary); Ollama dormant local fallback
+- **Persistence**: PostgreSQL (asyncpg) — job history only, no accounts/sessions
+- **Bot**: python-telegram-bot (voice notes → same pipeline)
 - **Frontend**: Gradio (planned, for HF Spaces)
 - **Language**: Python 3.11+
 
@@ -27,38 +31,45 @@ ADHD-friendly audio-to-structured-task pipeline.
 ```
 backend/
   app/
-    api/        # FastAPI route handlers
-    core/       # Config, settings (pydantic-settings + .env)
-    models/     # Pydantic request/response schemas
-    services/   # Whisper service, LLM service, audio processing
+    api/        # FastAPI route handlers (health, transcribe, process)
+    core/       # Config, settings (pydantic-settings + .env), event loop ref
+    db/         # asyncpg pool, jobs table, repository functions
+    models/     # Pydantic schemas (StructuredOutput enforces ADHD limits)
+    services/   # whisper_service, gemini_service, ollama_service, job_runner
+    telegram/   # Bot wiring + handlers
+  tests/        # pytest — no live deps, services mocked at the boundary
   requirements.txt
 specs/
-  001-focustask-agent/
-    spec.md     # Full feature spec with user stories, FRs, success criteria
+  001-focustask-agent/   # spec.md, plan.md, tasks.md, research, contracts
+.specify/
+  memory/constitution.md # Project constitution (v1.0.1) — read before big changes
 ```
 
-## Key constraints
+## Key constraints (see constitution for the authoritative version)
 
-- Stateless — no DB, no user accounts, no persistence (v1)
-- Deployment target: HF Spaces free tier (low traffic, portfolio)
-- PT-BR primary language, English secondary
-- Windows-first for the desktop capture companion script
-- No paid software or API keys for core flow (all local)
-- Desktop script uses Windows WASAPI loopback — no virtual audio cable required
+- Local-first, zero-cost core: transcription local; local LLM fallback must stay viable
+- PostgreSQL persists job artifacts only — no user accounts, no sessions, no cross-job reads
+- ADHD output limits are enforced in code (`schemas.py`): objetivo ≤30 words, checklist 3–10, fluxo 3–6
+- PT-BR primary language; output matches input audio language
+- Deployment target: HF Spaces free tier (CPU-only, ephemeral FS, cold starts)
+- Windows-first for the desktop capture companion script (WASAPI loopback, no virtual cable)
+- Tests must not require live LLM/PostgreSQL/network/audio — mock at the service boundary
 
 ## Common commands
 
 ```bash
-# Run API locally
-uvicorn backend.app.main:app --reload --port 8000
-
-# Run Ollama (must be running before API starts)
-ollama run llama3
-
 # Install deps
 pip install -r backend/requirements.txt
+
+# Run API locally (from backend/ — app imports are rooted there)
+cd backend && uvicorn app.main:app --reload --port 8000
+
+# Run tests
+cd backend && python -m pytest tests/ -v
 ```
+
+Required `.env` (in `backend/`): `GEMINI_API_KEY` (and optional `GEMINI_API_KEY_FALLBACK`), `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`.
 
 ## Active spec
 
-`specs/001-focustask-agent/spec.md` — covers all 5 user stories, 19 functional requirements, and 8 success criteria. Read it before implementing any new feature.
+`specs/001-focustask-agent/spec.md` — user stories, functional requirements, success criteria. Read it before implementing any new feature. Workflow and quality gates: `.specify/memory/constitution.md`.

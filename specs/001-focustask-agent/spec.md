@@ -254,9 +254,9 @@ flowchart TD
 - The intermediate consolidated summary is an internal pipeline artifact; exposing it in the UI is optional (useful for debugging/transparency, not required for v1)
 - Obsidian vault import is manual (user drops the downloaded `.md` into the vault); no direct vault/plugin integration in v1
 - The `- [ ]` Markdown task syntax is the compatibility contract — output also renders correctly in any standard Markdown tool (GitHub, VS Code, Notion import)
-- Each session is stateless — no user accounts, no history, no persistence in v1
+- No user accounts or sessions — PostgreSQL persists job artifacts only (transcript, summary, structured output); a job is readable by its own job id, never by user identity or cross-job queries
 - Deployment target is Hugging Face Spaces free tier; expected load is low (portfolio demo traffic)
-- Data privacy and LGPD/GDPR compliance are out of scope for v1 (no data is stored)
+- Data privacy and LGPD/GDPR compliance are out of scope for v1 (no personal data is stored beyond job artifacts — see constitution, Stack & Platform Constraints)
 - The checklist output language matches the input audio language (PT-BR in → PT-BR out)
 - Desktop script targets Windows as primary OS (user's platform); macOS/Linux are stretch goals
 - System audio loopback capture requires a virtual audio device or OS-level loopback support (e.g., Windows WASAPI loopback) — no paid virtual cable software required
