@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.gemini_service import gemini_service
+from app.services.gemini_service import PipelineStageError, gemini_service
 from app.services.whisper_service import whisper_service
 
 # TestClient used without a context manager on purpose: lifespan (DB init,
@@ -11,18 +11,18 @@ from app.services.whisper_service import whisper_service
 client = TestClient(app)
 
 
-async def _fake_create_job(job_id: str, source: str = "web") -> None:
+@pytest.fixture(autouse=True)
+def _no_db(mock_db):
     pass
 
 
-@pytest.fixture(autouse=True)
-def _no_db(monkeypatch):
-    monkeypatch.setattr("app.api.routes.process.create_job", _fake_create_job)
+@pytest.fixture
+def _two_stage_ok(monkeypatch, ptbr_summary, structured_dict):
+    monkeypatch.setattr(gemini_service, "summarize", lambda t, language="pt": ptbr_summary)
+    monkeypatch.setattr(gemini_service, "decompose", lambda s, language="pt": structured_dict)
 
 
-def test_process_text_returns_structured_output(monkeypatch, ptbr_transcript, structured_dict):
-    monkeypatch.setattr(gemini_service, "structure", lambda transcript, language="pt": structured_dict)
-
+def test_process_text_returns_structured_output(_two_stage_ok, ptbr_transcript, structured_dict):
     resp = client.post("/api/process/text", json={"transcript": ptbr_transcript})
 
     assert resp.status_code == 200
@@ -31,6 +31,7 @@ def test_process_text_returns_structured_output(monkeypatch, ptbr_transcript, st
     assert body["structured"]["objetivo"] == structured_dict["objetivo"]
     assert body["structured"]["checklist"] == structured_dict["checklist"]
     assert body["structured"]["fluxo"] == structured_dict["fluxo"]
+    assert body["markdown"].startswith("# ")
     assert body["job_id"]
 
 
@@ -39,28 +40,33 @@ def test_process_text_rejects_empty_transcript():
     assert resp.status_code == 400
 
 
-def test_process_text_llm_failure_returns_500(monkeypatch, ptbr_transcript):
+def test_process_text_llm_failure_returns_tagged_500(monkeypatch, ptbr_transcript):
     def _boom(transcript, language="pt"):
-        raise RuntimeError("All Gemini keys failed")
+        raise PipelineStageError("summarization", "All Gemini keys failed")
 
-    monkeypatch.setattr(gemini_service, "structure", _boom)
+    monkeypatch.setattr(gemini_service, "summarize", _boom)
 
     resp = client.post("/api/process/text", json={"transcript": ptbr_transcript})
     assert resp.status_code == 500
-    assert "LLM processing failed" in resp.json()["detail"]
+    assert "LLM processing failed: [summarization]" in resp.json()["detail"]
 
 
-def test_process_audio_full_pipeline_mocked(monkeypatch, ptbr_transcript, structured_dict):
+def test_process_audio_full_pipeline_mocked(
+    monkeypatch, _two_stage_ok, ptbr_transcript, structured_dict
+):
+    monkeypatch.setattr(
+        "app.api.routes.process.audio_converter.get_duration_seconds",
+        lambda audio_bytes, filename: 30.0,
+    )
     monkeypatch.setattr(
         whisper_service,
         "transcribe",
         lambda audio_bytes, filename, **kwargs: {
             "raw_transcript": ptbr_transcript,
             "language": "pt",
-            "duration_seconds": 12.5,
+            "duration_seconds": 30.0,
         },
     )
-    monkeypatch.setattr(gemini_service, "structure", lambda transcript, language="pt": structured_dict)
 
     resp = client.post(
         "/api/process/audio",
@@ -71,6 +77,7 @@ def test_process_audio_full_pipeline_mocked(monkeypatch, ptbr_transcript, struct
     body = resp.json()
     assert body["raw_transcript"] == ptbr_transcript
     assert body["structured"] == structured_dict
+    assert body["markdown_url"].endswith("/download.md")
 
 
 def test_process_audio_rejects_empty_file():
@@ -81,12 +88,15 @@ def test_process_audio_rejects_empty_file():
     assert resp.status_code == 400
 
 
-def test_output_limits_enforced_at_route_level(monkeypatch, ptbr_transcript, structured_dict):
+def test_output_limits_enforced_at_route_level(
+    monkeypatch, ptbr_transcript, ptbr_summary, structured_dict
+):
     # LLM returns out-of-bounds output → route response must be clamped
     # (Constitution Principle III).
     structured_dict["checklist"] = [f"Fazer passo {i}" for i in range(20)]
     structured_dict["fluxo"] = [f"Estágio {i}" for i in range(10)]
-    monkeypatch.setattr(gemini_service, "structure", lambda transcript, language="pt": structured_dict)
+    monkeypatch.setattr(gemini_service, "summarize", lambda t, language="pt": ptbr_summary)
+    monkeypatch.setattr(gemini_service, "decompose", lambda s, language="pt": structured_dict)
 
     resp = client.post("/api/process/text", json={"transcript": ptbr_transcript})
 

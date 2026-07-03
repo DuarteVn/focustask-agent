@@ -64,8 +64,9 @@ def test_structure_sends_ptbr_prompt_and_transcript(monkeypatch, ptbr_transcript
 
 def test_prompt_matches_gemini_output_contract():
     # Dormant fallback must stay interface-compatible with the primary LLM
-    # (Constitution Principle I) — same 3-section schema in the prompt.
-    from app.services.gemini_service import SYSTEM_PROMPT as GEMINI_PROMPT
+    # (Constitution Principle I) — same 3-section schema as Gemini's Stage 2.
+    # Ollama two-stage parity is explicitly deferred (research R9).
+    from app.services.gemini_service import DECOMPOSE_PROMPT as GEMINI_PROMPT
 
     for section in ('"objetivo"', '"checklist"', '"fluxo"'):
         assert section in ollama_module.SYSTEM_PROMPT

@@ -73,6 +73,8 @@ class ProcessResponse(BaseModel):
     job_id: str
     raw_transcript: str
     structured: StructuredOutput
+    markdown: str
+    markdown_url: str
 
 
 class JobStatus(BaseModel):
@@ -81,6 +83,7 @@ class JobStatus(BaseModel):
     structured: Optional[StructuredOutput] = None
     transcript: Optional[str] = None
     error: Optional[str] = None
+    markdown_url: Optional[str] = None
 
 
 class HealthResponse(BaseModel):

@@ -1,109 +1,13 @@
 import asyncio
-import json
-
-import pytest
 
 from app.core.config import settings
-from app.services import gemini_service as gemini_module
 from app.services import job_runner
-from app.services.gemini_service import GeminiService
 from app.services.whisper_service import whisper_service
 
-# ---------------------------------------------------------------------------
-# Gemini retry / key failover
-# ---------------------------------------------------------------------------
-
-
-class _TransientError(Exception):
-    code = 503
-
-
-class _FatalError(Exception):
-    code = 400
-
-
-class _FakeResponse:
-    def __init__(self, payload: dict):
-        self.text = json.dumps(payload, ensure_ascii=False)
-
-
-class _FakeModels:
-    def __init__(self, script: list, calls: list):
-        self._script = script
-        self._calls = calls
-
-    def generate_content(self, **kwargs):
-        self._calls.append(kwargs)
-        outcome = self._script.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return _FakeResponse(outcome)
-
-
-def _fake_client_factory(script: list, calls: list, keys_used: list):
-    class _FakeClient:
-        def __init__(self, api_key: str, http_options=None):
-            keys_used.append(api_key)
-            self.models = _FakeModels(script, calls)
-
-    return _FakeClient
-
-
-@pytest.fixture
-def _gemini_keys(monkeypatch):
-    monkeypatch.setattr(settings, "gemini_api_key", "key-primary")
-    monkeypatch.setattr(settings, "gemini_api_key_fallback", "key-fallback")
-    monkeypatch.setattr(gemini_module.time, "sleep", lambda s: None)
-
-
-def test_gemini_retries_transient_error_then_succeeds(monkeypatch, _gemini_keys, structured_dict, ptbr_transcript):
-    calls, keys_used = [], []
-    script = [_TransientError(), _TransientError(), structured_dict]
-    monkeypatch.setattr(
-        gemini_module.genai, "Client", _fake_client_factory(script, calls, keys_used)
-    )
-
-    result = GeminiService().structure(ptbr_transcript)
-
-    assert result == structured_dict
-    assert len(calls) == 3  # 2 transient failures + 1 success, same key
-    assert keys_used == ["key-primary"]
-
-
-def test_gemini_fatal_error_fails_over_to_fallback_key(monkeypatch, _gemini_keys, structured_dict, ptbr_transcript):
-    calls, keys_used = [], []
-    script = [_FatalError(), structured_dict]
-    monkeypatch.setattr(
-        gemini_module.genai, "Client", _fake_client_factory(script, calls, keys_used)
-    )
-
-    result = GeminiService().structure(ptbr_transcript)
-
-    assert result == structured_dict
-    assert keys_used == ["key-primary", "key-fallback"]
-
-
-def test_gemini_all_keys_exhausted_raises(monkeypatch, _gemini_keys, ptbr_transcript):
-    calls, keys_used = [], []
-    script = [_FatalError(), _FatalError()]
-    monkeypatch.setattr(
-        gemini_module.genai, "Client", _fake_client_factory(script, calls, keys_used)
-    )
-
-    with pytest.raises(RuntimeError, match="All Gemini keys failed"):
-        GeminiService().structure(ptbr_transcript)
-
-
-def test_gemini_no_key_configured_raises(monkeypatch, ptbr_transcript):
-    monkeypatch.setattr(settings, "gemini_api_key", "")
-    monkeypatch.setattr(settings, "gemini_api_key_fallback", "")
-
-    with pytest.raises(RuntimeError, match="No Gemini API key configured"):
-        GeminiService().structure(ptbr_transcript)
-
+# Gemini retry/failover coverage lives in tests/unit/test_gemini_service.py.
 
 # ---------------------------------------------------------------------------
-# Job runner: timeout + heartbeat (Telegram path)
+# Job runner: dynamic timeout + heartbeat (Telegram path)
 # ---------------------------------------------------------------------------
 
 
@@ -126,12 +30,41 @@ def test_telegram_job_timeout_sets_error_and_notifies_ptbr(monkeypatch):
     monkeypatch.setattr(job_runner, "set_error", _fake_set_error)
     monkeypatch.setattr(job_runner, "_send", _fake_send)
     monkeypatch.setattr(job_runner, "run_job", _never_finishes)
+    monkeypatch.setattr(job_runner, "_TIMEOUT_POLL_SECONDS", 0.01)
     monkeypatch.setattr(settings, "job_timeout_seconds", 0)
 
     asyncio.run(job_runner.run_job_telegram("job-1", b"x", chat_id=42))
 
     assert errors and "timeout" in errors[0]
     assert sent and "demorou demais" in sent[-1]  # PT-BR user-facing copy
+
+
+def test_dynamic_timeout_extends_for_long_audio(monkeypatch):
+    """45-min audio must NOT die at the base timeout (research R4)."""
+    finished = []
+
+    async def _long_job(job_id, audio_bytes, filename="audio.ogg", progress=None):
+        # Whisper "reported" a long duration; job outlives the base timeout.
+        progress["duration_seconds"] = 2700.0
+        await asyncio.sleep(0.05)
+        finished.append(job_id)
+        return {"objetivo": "ok", "checklist": [], "fluxo": [], "transcript": "t"}
+
+    monkeypatch.setattr(job_runner, "_TIMEOUT_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "job_timeout_seconds", 0)  # base would kill it
+    monkeypatch.setattr(settings, "job_timeout_factor", 1.5)
+
+    async def _run():
+        progress = {"stage": "transcrevendo", "pct": 0}
+        task = asyncio.create_task(_long_job("job-1", b"x", progress=progress))
+        import time
+
+        return await job_runner._wait_with_dynamic_timeout(task, progress, time.perf_counter())
+
+    result = asyncio.run(_run())
+
+    assert finished == ["job-1"]
+    assert result["objetivo"] == "ok"
 
 
 def test_heartbeat_reports_stage_and_progress(monkeypatch):
@@ -148,9 +81,13 @@ def test_heartbeat_reports_stage_and_progress(monkeypatch):
         task = asyncio.create_task(job_runner._heartbeat("job-1", 42, progress))
         while not sent:
             await asyncio.sleep(0)
+        progress["stage"] = "sumarizando"
+        count = len(sent)
+        while len(sent) == count:
+            await asyncio.sleep(0)
         progress["stage"] = "estruturando"
-        first_count = len(sent)
-        while len(sent) == first_count:
+        count = len(sent)
+        while len(sent) == count:
             await asyncio.sleep(0)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -158,10 +95,11 @@ def test_heartbeat_reports_stage_and_progress(monkeypatch):
     asyncio.run(_run())
 
     assert any("40%" in m for m in sent)
-    assert any("estruturando" in m for m in sent)
+    assert any("consolidando o contexto" in m for m in sent)  # sumarizando stage
+    assert any("estruturando tarefas" in m for m in sent)
 
 
-def test_format_result_escapes_html_and_links_panel():
+def test_format_result_escapes_html_and_links_panel_and_download():
     result = {
         "objetivo": "Lançar <v2> & validar",
         "checklist": ["Testar <script>"],
@@ -172,6 +110,7 @@ def test_format_result_escapes_html_and_links_panel():
     assert "&lt;v2&gt; &amp; validar" in msg
     assert "&lt;script&gt;" in msg
     assert f"{settings.web_panel_base_url}/jobs/abc-123" in msg
+    assert f"{settings.web_panel_base_url}/jobs/abc-123/download.md" in msg
 
 
 # ---------------------------------------------------------------------------

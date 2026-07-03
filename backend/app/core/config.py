@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Jobs
     job_timeout_seconds: int = 600
     job_heartbeat_seconds: int = 45
+    job_timeout_factor: float = 1.5
+    sync_processing_max_seconds: int = 300
 
     # Ollama (dormant local fallback — Constitution Principle I)
     ollama_base_url: str = "http://localhost:11434"

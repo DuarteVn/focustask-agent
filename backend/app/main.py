@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, process, transcribe
+from app.api.routes import health, jobs, process, transcribe
 from app.core.config import settings
 from app.core.loop import set_main_loop
 from app.db.database import close_db, init_db
@@ -63,3 +63,4 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(transcribe.router, prefix="/api")
 app.include_router(process.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
