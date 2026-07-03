@@ -14,18 +14,29 @@ from app.services.whisper_service import whisper_service
 logger = logging.getLogger(__name__)
 
 
-async def run_job(job_id: str, audio_bytes: bytes, filename: str = "audio.ogg") -> dict:
+async def run_job(job_id: str, audio_bytes: bytes, filename: str = "audio.ogg", progress: dict | None = None) -> dict:
     """Transcribe + structure. Returns {objetivo, checklist, fluxo, transcript}."""
     t0 = time.perf_counter()
     try:
         logger.info("[%s] whisper start | size=%d bytes", job_id[:8], len(audio_bytes))
-        result = await asyncio.to_thread(whisper_service.transcribe, audio_bytes, filename)
+
+        def _on_progress(pct: int) -> None:
+            logger.info("[%s] whisper progress | %d%%", job_id[:8], pct)
+            if progress is not None:
+                progress["stage"] = "transcrevendo"
+                progress["pct"] = pct
+
+        result = await asyncio.to_thread(whisper_service.transcribe, audio_bytes, filename, _on_progress)
         transcript = result["raw_transcript"]
         language = result.get("language", "pt")
         t_whisper = time.perf_counter() - t0
         logger.info("[%s] whisper done | lang=%s | chars=%d | %.1fs", job_id[:8], language, len(transcript), t_whisper)
 
         await set_processing(job_id, transcript)
+
+        if progress is not None:
+            progress["stage"] = "estruturando"
+            progress["pct"] = 0
 
         structured = await asyncio.to_thread(gemini_service.structure, transcript, language)
         t_gemini = time.perf_counter() - t0 - t_whisper
@@ -49,14 +60,46 @@ async def run_job_telegram(job_id: str, audio_bytes: bytes, chat_id: int) -> Non
     """Run pipeline and send Telegram reply via REST API (cross-loop safe)."""
     await create_job(job_id, source="telegram")
     t0 = time.perf_counter()
+    progress: dict = {"stage": "transcrevendo", "pct": 0}
+    heartbeat = asyncio.create_task(_heartbeat(job_id, chat_id, progress))
     try:
-        result = await run_job(job_id, audio_bytes, "audio.ogg")
+        result = await asyncio.wait_for(
+            run_job(job_id, audio_bytes, "audio.ogg", progress),
+            timeout=settings.job_timeout_seconds,
+        )
         msg = _format_result(result, job_id)
         await _send(chat_id, msg, parse_mode="HTML")
         logger.info("[%s] sent to chat=%s | total=%.1fs", job_id[:8], chat_id, time.perf_counter() - t0)
+    except asyncio.TimeoutError:
+        logger.error("[%s] telegram job timed out after %.1fs", job_id[:8], time.perf_counter() - t0)
+        await set_error(job_id, f"timeout after {settings.job_timeout_seconds}s")
+        await _send(chat_id, "❌ O processamento demorou demais e foi cancelado. Tente um áudio mais curto.")
     except Exception as e:
         logger.error("[%s] telegram job error: %s", job_id[:8], e)
         await _send(chat_id, "❌ Erro ao processar o áudio. Tente novamente.")
+    finally:
+        heartbeat.cancel()
+
+
+async def _heartbeat(job_id: str, chat_id: int, progress: dict) -> None:
+    """Notify the user the job is still alive on long-running audio, with % when known."""
+    delay = settings.job_heartbeat_seconds
+    try:
+        while True:
+            await asyncio.sleep(delay)
+            stage = progress.get("stage", "processando")
+            pct = progress.get("pct", 0)
+            logger.info("[%s] still %s | %d%%", job_id[:8], stage, pct)
+            if stage == "transcrevendo" and pct:
+                text = f"⏳ Transcrevendo... {pct}% concluído (áudio longo)."
+            elif stage == "estruturando":
+                text = "⏳ Transcrição concluída, estruturando tarefas..."
+            else:
+                text = "⏳ Ainda processando... áudio longo pode levar alguns minutos."
+            await _send(chat_id, text)
+            delay = min(delay * 2, 120)
+    except asyncio.CancelledError:
+        pass
 
 
 async def _send(chat_id: int, text: str, parse_mode: str = "") -> None:

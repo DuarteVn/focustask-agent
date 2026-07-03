@@ -1,7 +1,9 @@
 import json
 import logging
+import time
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.core.config import settings
@@ -9,6 +11,9 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-2.5-flash"
+_TRANSIENT_CODES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+_RETRY_BASE_SECONDS = 5
 
 SYSTEM_PROMPT = """Você é um assistente cognitivo especializado em gestão de tarefas para pessoas com TDAH.
 Sua ÚNICA função: receber uma transcrição bruta de reunião/conversa e retornar UM ÚNICO objeto JSON válido.
@@ -45,21 +50,33 @@ class GeminiService:
 
         last_err = None
         for key in keys:
-            try:
-                client = genai.Client(api_key=key)
-                response = client.models.generate_content(
-                    model=_MODEL,
-                    contents=f"Transcrição:\n{transcript}",
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT,
-                        response_mime_type="application/json",
-                        temperature=0.1,
-                    ),
-                )
-                return json.loads(response.text)
-            except Exception as e:
-                last_err = e
-                logger.warning("Gemini key failed: %s", e)
+            client = genai.Client(
+                api_key=key,
+                http_options=types.HttpOptions(timeout=settings.gemini_timeout_ms),
+            )
+            for attempt in range(1, _MAX_RETRIES + 1):
+                try:
+                    response = client.models.generate_content(
+                        model=_MODEL,
+                        contents=f"Transcrição:\n{transcript}",
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_PROMPT,
+                            response_mime_type="application/json",
+                            temperature=0.1,
+                        ),
+                    )
+                    return json.loads(response.text)
+                except Exception as e:
+                    last_err = e
+                    code = getattr(e, "code", None)
+                    transient = isinstance(e, genai_errors.ServerError) or code in _TRANSIENT_CODES
+                    if transient and attempt < _MAX_RETRIES:
+                        wait = _RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+                        logger.warning("Gemini transient error (attempt %d/%d): %s | retrying in %ds", attempt, _MAX_RETRIES, e, wait)
+                        time.sleep(wait)
+                        continue
+                    logger.warning("Gemini key failed: %s", e)
+                    break
 
         raise RuntimeError(f"All Gemini keys failed: {last_err}")
 
