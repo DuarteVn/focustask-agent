@@ -51,10 +51,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# allow_credentials must stay False with wildcard origins (CORS spec forbids
+# the combination); the API uses no cookies, so credentials are unnecessary.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
