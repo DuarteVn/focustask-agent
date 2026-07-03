@@ -25,6 +25,15 @@ async def set_processing(job_id: str, transcript: str) -> None:
         )
 
 
+async def set_summary(job_id: str, summary: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE jobs SET summary=$1 WHERE job_id=$2",
+            summary, job_id,
+        )
+
+
 async def set_done(job_id: str, objetivo: str, checklist: list, fluxo: list) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
