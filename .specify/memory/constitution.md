@@ -1,20 +1,40 @@
 <!--
 Sync Impact Report — 2026-07-02
-Version change: (template, unratified) → 1.0.0
-Modified principles: n/a (initial adoption — all 6 principles new)
-Added sections: Core Principles (I–VI), Stack & Platform Constraints,
-  Development Workflow, Governance
-Removed sections: none (template placeholders replaced)
+Version change: 1.0.0 → 1.0.1
+Modified principles:
+  - VI. Free-Tier Deployability — clarified persistence wording: "no
+    disk-persisted state" → "no state persisted to the Space's local
+    filesystem"; external managed PostgreSQL job history (per Stack &
+    Platform Constraints) is explicitly compatible, resolving the internal
+    tension with that section.
+Modified sections:
+  - Stack & Platform Constraints — clarified "single request/queue pass"
+    wording: reading a job's OWN persisted artifacts by job id (async
+    polling/download) is allowed; the prohibition targets accounts,
+    sessions, and cross-job/user state.
+Added sections: none
+Removed sections: none
 Templates status:
   ✅ .specify/templates/plan-template.md — generic "Constitution Check" gate
      resolves against this file; no edit needed
   ✅ .specify/templates/spec-template.md — no constitution-mandated section
      changes; no edit needed
-  ✅ .specify/templates/tasks-template.md — test-task guidance compatible with
-     Principle V; no edit needed
-  ⚠ specs/001-focustask-agent/plan.md — Constitution Check section written
-     against "unfilled template" baseline; re-evaluated in remediation pass
-     on branch chore/spec-remediation-constitution
+  ⚠ .specify/templates/tasks-template.md — marks tests "OPTIONAL - only if
+     explicitly requested", softer than Principle V ("a red test suite
+     blocks merge"); suggested alignment edit pending maintainer decision
+  ✅ specs/001-focustask-agent/plan.md — Constitution Check now evaluated
+     against filled v1.0.0 (plan.md:40); prior ⚠ resolved
+Known open violations (code/docs follow-ups, tracked outside this file):
+  - P-I: backend/app/services/ollama_service.py is dead code — references
+    missing settings keys (ollama_base_url/ollama_model), English prompt,
+    divergent output schema; local fallback not currently viable
+  - P-III: numeric output limits (≤30-word objective, 3–10 checklist,
+    3–6 flow) not validated in backend/app/models/schemas.py
+  - P-IV: root CLAUDE.md stale ("Ollama LLM (local)", "Stateless — no DB");
+    fix already tasked as T021 in specs/001-focustask-agent/tasks.md
+  - P-V: no pytest suite exists yet (backend/tests/ absent)
+  - spec.md:257,259 ("no persistence in v1", "no data is stored")
+    contradict PostgreSQL job history in constitution/plan/data-model
 Deferred TODOs: none
 -->
 
@@ -74,9 +94,10 @@ blocks merge.
 ### VI. Free-Tier Deployability
 
 The web app MUST run on Hugging Face Spaces free tier: CPU-only, limited RAM, ephemeral
-filesystem, cold starts. Therefore: no disk-persisted state (render/export on the fly), no
-GPU-dependent code paths, graceful behavior on slow CPU transcription (progress feedback,
-duration-scaled timeouts). The desktop companion script MUST run on Windows without admin
+filesystem, cold starts. Therefore: no state persisted to the Space's local filesystem
+(render/export on the fly; job history lives in the external managed PostgreSQL permitted
+by Stack & Platform Constraints), no GPU-dependent code paths, graceful behavior on slow
+CPU transcription (progress feedback, duration-scaled timeouts). The desktop companion script MUST run on Windows without admin
 privileges.
 
 *Rationale: deployment target is fixed and free; anything that breaks there doesn't ship.*
@@ -85,7 +106,7 @@ privileges.
 
 - Python 3.11+, FastAPI + Uvicorn backend under `backend/app/` (api/core/db/models/services/telegram layout)
 - Transcription: faster-whisper local; LLM: Gemini free tier primary, Ollama dormant fallback (Principle I)
-- Persistence: PostgreSQL for job history only — jobs MUST remain processable end-to-end in a single request/queue pass without reading prior user state (no accounts, no sessions)
+- Persistence: PostgreSQL for job history only — jobs MUST remain processable end-to-end in a single request/queue pass without reading prior user state (no accounts, no sessions, no cross-job reads); reading a job's OWN persisted artifacts by job id (async status polling, result download) is allowed
 - Public unauthenticated demo endpoint is acceptable (portfolio scope); LGPD/GDPR compliance out of scope while no personal data is stored beyond job artifacts
 - Windows-first for local dev and the desktop capture script (WASAPI loopback, no virtual cable)
 
@@ -106,4 +127,4 @@ reviewed at every `/speckit-plan` Constitution Check and re-verified by `/specki
 violations MUST be either fixed or explicitly justified in the plan's Complexity Tracking
 table — never silently ignored.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-02 | **Last Amended**: 2026-07-02
+**Version**: 1.0.1 | **Ratified**: 2026-07-02 | **Last Amended**: 2026-07-02
