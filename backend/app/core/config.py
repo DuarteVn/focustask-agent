@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_api_key_fallback: str = ""
+    gemini_timeout_ms: int = 60_000
+
+    # Jobs
+    job_timeout_seconds: int = 600
+    job_heartbeat_seconds: int = 45
+
+    # Ollama (dormant local fallback — Constitution Principle I)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3"
 
     # App
     temp_audio_dir: str = "./temp_audio"

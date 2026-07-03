@@ -5,36 +5,42 @@ import re
 import httpx
 
 from app.core.config import settings
-from app.models.schemas import GlossaryItem, MicroTask, StructuredTask
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a cognitive assistant specialized in ADHD task management.
-Your ONLY job: receive a raw meeting/conversation transcript and return a SINGLE valid JSON object.
-No prose, no markdown, no explanation — just the JSON.
+# Dormant local fallback (Constitution Principle I: Local-First, Zero-Cost Core).
+# Interface-compatible with GeminiService.structure() so it can replace Gemini
+# without touching callers. The prompt mirrors gemini_service.SYSTEM_PROMPT —
+# keep the two in sync when the output contract changes.
+SYSTEM_PROMPT = """Você é um assistente cognitivo especializado em gestão de tarefas para pessoas com TDAH.
+Sua ÚNICA função: receber uma transcrição bruta de reunião/conversa e retornar UM ÚNICO objeto JSON válido.
+Sem prosa, sem markdown, sem explicação — somente o JSON.
 
-JSON schema (strict):
+Schema JSON (estrito):
 {
-  "big_picture": "string — one sentence, the macro goal",
-  "micro_tasks": [
-    {"order": 1, "action": "string — one atomic action verb + object"}
+  "objetivo": "string — UMA frase no imperativo (máx. 30 palavras) descrevendo o que deve ser entregue",
+  "checklist": [
+    "string — passo atômico e acionável começando com verbo de ação"
   ],
-  "definition_of_done": ["string — measurable criterion"],
-  "glossary": [
-    {"term": "string", "definition": "string — plain language"}
+  "fluxo": [
+    "string — estágio da jornada de execução (máx. 8 palavras cada)"
   ]
 }
 
-Rules:
-- micro_tasks: break every action into the SMALLEST possible step. If unsure, split further.
-- definition_of_done: measurable, observable. NOT vague like "finished" or "done".
-- glossary: only include acronyms, jargon, or ambiguous terms actually present in the transcript.
-- Respond in the SAME language as the transcript.
-- Output ONLY the JSON object. Nothing before or after it."""
+Regras:
+- objetivo: UMA frase, imperativo, o que deve ser entregue. Máx. 30 palavras.
+- checklist: 3 a 10 itens. Cada item = passo específico e executável de forma independente. Começar com verbo de ação.
+- fluxo: 3 a 6 estágios mostrando a jornada do estado inicial ao resultado final.
+  - Primeiro estágio: estado inicial ou entrada (o que existe hoje)
+  - Último estágio: resultado final ou entrega esperada
+  - Estágios do meio: as principais transformações
+  - Cada estágio: máx. 8 palavras, claro e específico
+- Responda NO MESMO IDIOMA da transcrição.
+- Retorne SOMENTE o objeto JSON. Nada antes ou depois."""
 
 
 def _extract_json(raw: str) -> dict:
-    """Strip markdown fences and parse first JSON object found."""
+    """Strip markdown fences and parse the first JSON object found."""
     cleaned = re.sub(r"```(?:json)?", "", raw).strip()
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if not match:
@@ -43,26 +49,14 @@ def _extract_json(raw: str) -> dict:
 
 
 class OllamaService:
-    def __init__(self) -> None:
-        self._client = httpx.AsyncClient(
-            base_url=settings.ollama_base_url,
-            timeout=120.0,
-        )
-
-    async def is_reachable(self) -> bool:
-        try:
-            resp = await self._client.get("/api/tags")
-            return resp.status_code == 200
-        except Exception:
-            return False
-
-    async def process_transcript(self, transcript: str) -> StructuredTask:
+    def structure(self, transcript: str, language: str = "pt") -> dict:
         payload = {
             "model": settings.ollama_model,
             "stream": False,
+            "format": "json",
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Transcript:\n{transcript}"},
+                {"role": "user", "content": f"Transcrição:\n{transcript}"},
             ],
             "options": {
                 "temperature": 0.1,
@@ -71,23 +65,20 @@ class OllamaService:
         }
 
         logger.info("Sending transcript to Ollama model=%s", settings.ollama_model)
-        resp = await self._client.post("/api/chat", json=payload)
-        resp.raise_for_status()
+        with httpx.Client(base_url=settings.ollama_base_url, timeout=120.0) as client:
+            resp = client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            raw_content = resp.json()["message"]["content"]
 
-        raw_content = resp.json()["message"]["content"]
         logger.debug("Ollama raw response: %s", raw_content[:500])
+        return _extract_json(raw_content)
 
-        data = _extract_json(raw_content)
-
-        return StructuredTask(
-            big_picture=data["big_picture"],
-            micro_tasks=[MicroTask(**t) for t in data["micro_tasks"]],
-            definition_of_done=data["definition_of_done"],
-            glossary=[GlossaryItem(**g) for g in data.get("glossary", [])],
-        )
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
+    def is_reachable(self) -> bool:
+        try:
+            with httpx.Client(base_url=settings.ollama_base_url, timeout=5.0) as client:
+                return client.get("/api/tags").status_code == 200
+        except Exception:
+            return False
 
 
 ollama_service = OllamaService()
